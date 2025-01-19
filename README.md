@@ -1,88 +1,39 @@
-# Zig S3 Client
+# S3 Client for Zig
 
-A lightweight S3 client implementation in Zig, supporting basic S3 operations
-with AWS S3 and S3-compatible services.
+A simple and efficient S3 client library for Zig, supporting AWS S3 and
+S3-compatible services.
 
 ## Features
 
-### Current Implementation
-
-- Basic S3 operations:
-  - Bucket management (create/delete)
-  - Object operations (put/get/delete)
-- Support for custom endpoints (compatible with MinIO, LocalStack, etc.)
-- Configurable region and endpoint
-- Basic error handling and custom error types
-- Memory safety with proper allocation and deallocation
-- Comprehensive test suite
-- Uses Zig's standard HTTP client
-- Modular code organization
-
-### Missing Features / TODO
-
-- [ ] AWS Signature V4 authentication (currently only basic credential header)
-- [ ] Advanced bucket operations (list, exists, policy management)
-- [ ] Advanced object operations (list, copy, multipart upload)
-- [ ] Streaming support for large objects
-- [ ] Proper content-type handling
-- [ ] Bucket/object metadata support
-- [ ] Presigned URLs
-- [ ] Server-side encryption
-- [ ] Bucket versioning
-- [ ] Object tagging
-- [ ] Cross-region operations
-- [ ] Retry logic and timeout configuration
-
-## Project Structure
-
-The project is organized into logical modules for better maintainability:
-
-```
-src/s3/
-├── lib.zig            # Library's public API
-├── types.zig          # Core types and client implementation
-├── bucket/
-│   └── operations.zig # Bucket-specific operations
-└── object/
-    └── operations.zig # Object-specific operations
-```
-
-### Module Responsibilities
-
-- **types.zig**: Contains core types (`S3Error`, `S3Config`) and the base
-  `S3Client` implementation with HTTP handling
-- **bucket/operations.zig**: Implements bucket-specific operations
-  (create/delete)
-- **object/operations.zig**: Implements object-specific operations
-  (put/get/delete)
-- **lib.zig**: Provides a clean public API by re-exporting functionality from
-  internal modules
+- Basic S3 operations (create/delete buckets, upload/download objects)
+- AWS Signature V4 authentication
+- Support for custom endpoints (MinIO, LocalStack, etc.)
+- Pagination support for listing objects
+- Convenient upload helpers for different content types
+- Memory-safe implementation using Zig's standard library
 
 ## Installation
 
-Add the dependency to your `build.zig.zon`:
+Add the package to your `build.zig.zon`:
 
 ```zig
 .{
     .name = "your-project",
     .version = "0.1.0",
     .dependencies = .{
-        .s3_client = .{
-            .url = "https://github.com/your-username/zig-s3-client/archive/refs/tags/v0.1.0.tar.gz",
-            .hash = "...", // Replace with actual hash
+        .s3 = .{
+            .url = "https://github.com/your-username/zig-s3/archive/v0.1.0.tar.gz",
+            .hash = "...",
         },
     },
 }
 ```
 
-## Usage
-
-### Basic Example
+## Quick Start
 
 ```zig
 const std = @import("std");
-const S3Client = @import("s3").S3Client;
-const S3Config = @import("s3").S3Config;
+const s3 = @import("s3");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -90,148 +41,123 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Initialize client
-    const config = S3Config{
-        .access_key_id = "your-access-key",
-        .secret_access_key = "your-secret-key",
+    var client = try s3.S3Client.init(allocator, .{
+        .access_key_id = "your-key",
+        .secret_access_key = "your-secret",
         .region = "us-east-1",
-        // Optional: custom endpoint for S3-compatible services
-        .endpoint = "http://localhost:9000",
-    };
-
-    var client = try S3Client.init(allocator, config);
+    });
     defer client.deinit();
 
-    // Create a bucket
+    // Create bucket
     try client.createBucket("my-bucket");
 
-    // Upload an object
-    const data = "Hello, S3!";
-    try client.putObject("my-bucket", "hello.txt", data);
+    // Upload different types of content using the uploader helper
+    var uploader = client.uploader();
 
-    // Download an object
-    const retrieved = try client.getObject("my-bucket", "hello.txt");
-    defer allocator.free(retrieved);
+    // Upload string content
+    try uploader.uploadString("my-bucket", "hello.txt", "Hello, S3!");
 
-    // Delete an object
-    try client.deleteObject("my-bucket", "hello.txt");
+    // Upload JSON data
+    const config = .{
+        .app_name = "example",
+        .version = "1.0.0",
+    };
+    try uploader.uploadJson("my-bucket", "config.json", config);
 
-    // Delete the bucket
-    try client.deleteBucket("my-bucket");
+    // Upload a file from the filesystem
+    try uploader.uploadFile("my-bucket", "data/image.jpg", "local/path/to/image.jpg");
+
+    // List objects
+    const objects = try client.listObjects("my-bucket", .{
+        .prefix = "data/",
+        .max_keys = 100,
+    });
+    defer {
+        for (objects) |object| {
+            allocator.free(object.key);
+            allocator.free(object.last_modified);
+            allocator.free(object.etag);
+        }
+        allocator.free(objects);
+    }
+
+    // Download object
+    const data = try client.getObject("my-bucket", "hello.txt");
+    defer allocator.free(data);
 }
 ```
 
-### Error Handling
+## API Reference
 
-The library provides custom error types through `S3Error`:
+### S3Client
 
-```zig
-pub const S3Error = error{
-    InvalidCredentials,
-    ConnectionFailed,
-    BucketNotFound,
-    ObjectNotFound,
-    InvalidResponse,
-    SignatureError,
-    OutOfMemory,
-};
-```
-
-Example with error handling:
+The main client interface for S3 operations.
 
 ```zig
-const object = client.getObject("bucket", "nonexistent-key") catch |err| switch (err) {
-    error.ObjectNotFound => {
-        std.debug.print("Object not found\n", .{});
-        return;
-    },
-    error.ConnectionFailed => {
-        std.debug.print("Connection failed\n", .{});
-        return;
-    },
-    else => return err,
-};
-defer allocator.free(object);
+const client = try s3.S3Client.init(allocator, .{
+    .access_key_id = "your-key",
+    .secret_access_key = "your-secret",
+    .region = "us-east-1",
+    .endpoint = "http://localhost:9000", // Optional, for S3-compatible services
+});
 ```
+
+### Bucket Operations
+
+- `createBucket(bucket_name: []const u8) !void`
+- `deleteBucket(bucket_name: []const u8) !void`
+- `listBuckets() ![]BucketInfo`
+
+### Object Operations
+
+- `putObject(bucket_name: []const u8, key: []const u8, data: []const u8) !void`
+- `getObject(bucket_name: []const u8, key: []const u8) ![]const u8`
+- `deleteObject(bucket_name: []const u8, key: []const u8) !void`
+- `listObjects(bucket_name: []const u8, options: ListObjectsOptions) ![]ObjectInfo`
+
+### ObjectUploader
+
+A helper for uploading different types of content:
+
+```zig
+var uploader = client.uploader();
+
+// Upload string content
+try uploader.uploadString("my-bucket", "hello.txt", "Hello, World!");
+
+// Upload JSON data
+const data = .{ .name = "example", .value = 42 };
+try uploader.uploadJson("my-bucket", "data.json", data);
+
+// Upload file from filesystem
+try uploader.uploadFile("my-bucket", "image.jpg", "path/to/local/image.jpg");
+```
+
+## Error Handling
+
+The library uses Zig's error union type for robust error handling. Common errors
+include:
+
+- `S3Error.InvalidCredentials`: Invalid AWS credentials
+- `S3Error.BucketNotFound`: Requested bucket doesn't exist
+- `S3Error.ObjectNotFound`: Requested object doesn't exist
+- `S3Error.ConnectionFailed`: Network or connection issues
+- `S3Error.InvalidResponse`: Unexpected response from S3 service
 
 ## Testing
 
-The project includes a comprehensive test suite covering basic operations. Run
-tests with:
+Run the test suite:
 
 ```bash
-zig build test
+zig test src/main.zig
 ```
-
-### Test Coverage
-
-- Basic bucket operations (create/delete)
-- Object operations (put/get/delete)
-- Error cases (e.g., object not found)
-- Custom endpoint configuration
-- Memory management
-
-## Building
-
-```bash
-# Build the library
-zig build
-
-# Run tests
-zig build test
-
-# Build with different optimization levels
-zig build -Doptimize=ReleaseSafe
-zig build -Doptimize=ReleaseFast
-zig build -Doptimize=ReleaseSmall
-```
-
-## Contributing
-
-Contributions are welcome! Here are some areas that need work:
-
-1. AWS Signature V4 implementation
-2. Additional S3 operations
-3. Improved error handling and retry logic
-4. Documentation improvements
-5. Performance optimizations
-6. Additional tests and examples
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
-for details.
+MIT License - see LICENSE file for details.
 
 ## Acknowledgments
 
-- Built with Zig's standard library
-- Inspired by AWS SDK implementations
-
-## AWS Signature V4 Implementation
-
-This library includes a complete implementation of AWS Signature V4 signing
-process:
-
-1. **Canonical Request Creation**
-   - HTTP method
-   - Canonical URI
-   - Canonical query string
-   - Canonical headers (sorted)
-   - Signed headers
-   - Hashed payload (SHA256)
-
-2. **String to Sign Creation**
-   - Algorithm specification
-   - Request date
-   - Credential scope
-   - Hashed canonical request
-
-3. **Signature Calculation**
-   - Derived signing key
-   - HMAC-SHA256 operations
-   - Final signature
-
-4. **Security Features**
-   - Request timestamp validation
-   - Content hash validation
-   - Proper header canonicalization
-   - Memory-safe string handling
+- AWS S3 Documentation
+- MinIO Documentation
+- Zig Standard Library

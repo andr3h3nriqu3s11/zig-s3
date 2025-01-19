@@ -4,12 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Create the s3 module
+    // Create the s3 library module
     const s3_module = b.addModule("s3", .{
         .root_source_file = b.path("src/s3/lib.zig"),
     });
 
-    // Create the library
+    // Create the library that others can use as a dependency
     const lib = b.addStaticLibrary(.{
         .name = "s3-client",
         .root_source_file = b.path("src/s3/lib.zig"),
@@ -19,35 +19,34 @@ pub fn build(b: *std.Build) void {
     lib.root_module.addImport("s3", s3_module);
     b.installArtifact(lib);
 
-    // Create example executable
-    const example = b.addExecutable(.{
+    // Create the example executable
+    const exe = b.addExecutable(.{
         .name = "s3-example",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    example.root_module.addImport("s3", s3_module);
-    b.installArtifact(example);
+    exe.root_module.addImport("s3", s3_module);
+    b.installArtifact(exe);
 
-    // Create run step for the example
-    const run_example = b.addRunArtifact(example);
+    // Create "run" step for the example
+    const run_cmd = b.addRunArtifact(exe);
+    run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
-        run_example.addArgs(args);
+        run_cmd.addArgs(args);
     }
-    const run_step = b.step("run", "Run the example");
-    run_step.dependOn(&run_example.step);
+    const run_step = b.step("run", "Run the example application");
+    run_step.dependOn(&run_cmd.step);
 
-    // Create tests
-    const main_tests = b.addTest(.{
+    // Add tests
+    const lib_tests = b.addTest(.{
         .root_source_file = b.path("src/s3/lib.zig"),
         .target = target,
         .optimize = optimize,
     });
-    main_tests.root_module.addImport("s3", s3_module);
 
-    const run_main_tests = b.addRunArtifact(main_tests);
     const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&run_main_tests.step);
+    test_step.dependOn(&b.addRunArtifact(lib_tests).step);
 
     // Add documentation
     const docs = b.addInstallDirectory(.{
@@ -55,14 +54,16 @@ pub fn build(b: *std.Build) void {
         .install_dir = .prefix,
         .install_subdir = "docs",
     });
-    const docs_step = b.step("docs", "Generate documentation");
+
+    const docs_step = b.step("docs", "Generate library documentation");
     docs_step.dependOn(&docs.step);
 
-    // Add format checking
+    // Add formatting
     const fmt = b.addFmt(.{
         .paths = &.{ "src", "build.zig" },
         .check = true,
     });
-    const fmt_step = b.step("fmt", "Check formatting");
+
+    const fmt_step = b.step("fmt", "Format source files");
     fmt_step.dependOn(&fmt.step);
 }

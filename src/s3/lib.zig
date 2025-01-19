@@ -42,10 +42,24 @@ pub const S3Error = error{
     SignatureError,
     /// Memory allocation failure
     OutOfMemory,
+    /// Invalid object key
+    InvalidObjectKey,
 };
 
 /// Re-export configuration type
 pub const S3Config = client.S3Config;
+
+/// Information about a bucket in S3
+pub const BucketInfo = bucket_ops.BucketInfo;
+
+/// Information about an object in S3
+pub const ObjectInfo = object_ops.ObjectInfo;
+
+/// Options for listing objects in a bucket
+pub const ListObjectsOptions = object_ops.ListObjectsOptions;
+
+/// Helper struct for uploading different types of content to S3
+pub const ObjectUploader = object_ops.ObjectUploader;
 
 /// Main client interface that provides S3 operations.
 /// This struct wraps the internal implementation and provides a clean public API.
@@ -87,6 +101,20 @@ pub const S3Client = struct {
         return bucket_ops.deleteBucket(self.inner, bucket_name);
     }
 
+    /// List all buckets owned by the authenticated user.
+    /// Memory for the returned slice and its contents must be freed by the caller.
+    ///
+    /// Returns: Slice of BucketInfo structs
+    ///
+    /// Errors:
+    ///   - InvalidCredentials: If authentication fails
+    ///   - InvalidResponse: If listing fails
+    ///   - ConnectionFailed: Network or connection issues
+    ///   - OutOfMemory: Memory allocation failure
+    pub fn listBuckets(self: *S3Client) ![]BucketInfo {
+        return bucket_ops.listBuckets(self.inner);
+    }
+
     // Re-export object operations as methods
     /// Upload an object to S3. See object/operations.zig for details.
     pub fn putObject(self: *S3Client, bucket_name: []const u8, key: []const u8, data: []const u8) !void {
@@ -101,5 +129,28 @@ pub const S3Client = struct {
     /// Delete an object from S3. See object/operations.zig for details.
     pub fn deleteObject(self: *S3Client, bucket_name: []const u8, key: []const u8) !void {
         return object_ops.deleteObject(self.inner, bucket_name, key);
+    }
+
+    /// List objects in a bucket with optional filtering and pagination.
+    /// Memory for the returned slice and its contents must be freed by the caller.
+    ///
+    /// Parameters:
+    ///   - bucket_name: Name of the bucket to list
+    ///   - options: Optional parameters for filtering and pagination
+    ///
+    /// Returns: Slice of ObjectInfo structs
+    ///
+    /// Errors:
+    ///   - BucketNotFound: If the bucket doesn't exist
+    ///   - InvalidResponse: If listing fails
+    ///   - ConnectionFailed: Network or connection issues
+    ///   - OutOfMemory: Memory allocation failure
+    pub fn listObjects(self: *S3Client, bucket_name: []const u8, options: ListObjectsOptions) ![]ObjectInfo {
+        return object_ops.listObjects(self.inner, bucket_name, options);
+    }
+
+    /// Create an object uploader helper for this client
+    pub fn uploader(self: *S3Client) ObjectUploader {
+        return ObjectUploader.init(self.inner);
     }
 };

@@ -13,3 +13,7 @@ zig-out/
 *.so
 *.dylib
 *.a
+
+# Keep archive directory
+!archive/
+!archive/**

@@ -29,7 +29,7 @@ Add the package to your `build.zig.zon`:
     .version = "0.1.0",
     .dependencies = .{
         .s3 = .{
-            .url = "https://github.com/ziglibs/zig-s3/archive/v0.2.0.tar.gz",
+            .url = "https://github.com/algoflows/zig-s3/archive/v0.2.0.tar.gz",
             // Don't forget to update hash after publishing
             .hash = "...",
         },

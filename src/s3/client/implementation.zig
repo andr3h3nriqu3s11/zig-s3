@@ -5,8 +5,11 @@ const Allocator = std.mem.Allocator;
 const http = std.http;
 const Uri = std.Uri;
 const fmt = std.fmt;
+const time = std.time;
 
 const lib = @import("../lib.zig");
+const signer = @import("auth/signer.zig");
+const time_utils = @import("auth/time.zig");
 const S3Error = lib.S3Error;
 
 /// Configuration for the S3 client.
@@ -72,32 +75,193 @@ pub const S3Client = struct {
         var req = try self.http_client.open(method, uri, .{
             .server_header_buffer = &server_header_buffer,
         });
+        errdefer req.deinit();
 
-        // Add AWS authentication header
-        var auth_header_buf: [256]u8 = undefined;
-        const auth_header = try self.getAuthHeader(&auth_header_buf);
+        // Calculate content hash
+        const content_hash = try signer.hashPayload(self.allocator, body);
+        defer self.allocator.free(content_hash);
+
+        // Get current timestamp
+        const now = time.timestamp();
+        const amz_date = try time_utils.formatAmzDateTime(self.allocator, now);
+        defer self.allocator.free(amz_date);
+
+        // Get host and path from URI
+        const uri_host = uri.host orelse return S3Error.InvalidResponse;
+        const host = try std.fmt.allocPrint(self.allocator, "{}", .{uri_host});
+        defer self.allocator.free(host);
+
+        const path = try std.fmt.allocPrint(self.allocator, "{}", .{uri.path});
+        defer self.allocator.free(path);
+
+        // Prepare headers for signing
+        var headers = std.StringHashMap([]const u8).init(self.allocator);
+        defer headers.deinit();
+
+        try headers.put("host", host);
+        try headers.put("x-amz-content-sha256", content_hash);
+        try headers.put("x-amz-date", amz_date);
+
+        // Sign the request
+        const credentials = signer.Credentials{
+            .access_key = self.config.access_key_id,
+            .secret_key = self.config.secret_access_key,
+            .region = self.config.region,
+            .service = "s3",
+        };
+
+        const params = signer.SigningParams{
+            .method = @tagName(method),
+            .path = path,
+            .headers = headers,
+            .body = body,
+            .timestamp = now,
+        };
+
+        const auth_header = try signer.signRequest(self.allocator, credentials, params);
+        defer self.allocator.free(auth_header);
+
+        // Add headers to request
         req.headers.authorization = .{ .override = auth_header };
+
+        // Add host header
+        req.headers.host = .{ .override = host };
+
+        // Add AWS specific headers
+        req.extra_headers = &[_]http.Header{
+            .{
+                .name = "x-amz-content-sha256",
+                .value = content_hash,
+            },
+            .{
+                .name = "x-amz-date",
+                .value = amz_date,
+            },
+        };
 
         if (body) |data| {
             req.transfer_encoding = .{ .content_length = data.len };
+            try req.writeAll(data);
         }
 
-        try req.send();
-
-        if (body) |data| {
-            var writer = req.writer();
-            _ = try writer.writeAll(data);
-            try req.finish();
-        }
-
+        try req.finish();
         try req.wait();
+
+        // Handle HTTP response status codes
+        switch (req.response.status) {
+            .ok, .created, .no_content => {}, // Success cases
+            .unauthorized => return S3Error.InvalidCredentials,
+            .forbidden => return S3Error.InvalidCredentials,
+            .not_found => return S3Error.BucketNotFound,
+            else => return S3Error.InvalidResponse,
+        }
+
         return req;
     }
-
-    /// Generate AWS authentication header.
-    /// TODO: Implement AWS Signature V4 signing process
-    /// Currently uses a basic credential format for testing.
-    fn getAuthHeader(self: *S3Client, buffer: []u8) ![]const u8 {
-        return fmt.bufPrint(buffer, "AWS4-HMAC-SHA256 Credential={s}", .{self.config.access_key_id});
-    }
 };
+
+test "S3Client request signing" {
+    const allocator = std.testing.allocator;
+
+    const config = S3Config{
+        .access_key_id = "AKIAIOSFODNN7EXAMPLE",
+        .secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        .region = "us-east-1",
+    };
+
+    var client = try S3Client.init(allocator, config);
+    defer client.deinit();
+
+    const uri = try Uri.parse("https://examplebucket.s3.amazonaws.com/test.txt");
+    var req = try client.request(.GET, uri, null);
+    defer req.deinit();
+
+    // Verify authorization header is present
+    try std.testing.expect(req.headers.contains("authorization"));
+
+    // Verify required AWS headers are present
+    try std.testing.expect(req.headers.contains("x-amz-content-sha256"));
+    try std.testing.expect(req.headers.contains("x-amz-date"));
+}
+
+test "S3Client initialization" {
+    const allocator = std.testing.allocator;
+
+    const config = S3Config{
+        .access_key_id = "test-key",
+        .secret_access_key = "test-secret",
+        .region = "us-east-1",
+        .endpoint = null,
+    };
+
+    var client = try S3Client.init(allocator, config);
+    defer client.deinit();
+
+    try std.testing.expectEqualStrings("test-key", client.config.access_key_id);
+    try std.testing.expectEqualStrings("us-east-1", client.config.region);
+    try std.testing.expect(client.config.endpoint == null);
+}
+
+test "S3Client custom endpoint" {
+    const allocator = std.testing.allocator;
+
+    const config = S3Config{
+        .access_key_id = "test-key",
+        .secret_access_key = "test-secret",
+        .region = "us-east-1",
+        .endpoint = "http://localhost:9000",
+    };
+
+    var client = try S3Client.init(allocator, config);
+    defer client.deinit();
+
+    try std.testing.expectEqualStrings("http://localhost:9000", client.config.endpoint.?);
+}
+
+test "S3Client request with body" {
+    const allocator = std.testing.allocator;
+
+    const config = S3Config{
+        .access_key_id = "test-key",
+        .secret_access_key = "test-secret",
+        .region = "us-east-1",
+    };
+
+    var client = try S3Client.init(allocator, config);
+    defer client.deinit();
+
+    const uri = try Uri.parse("https://example.s3.amazonaws.com/test.txt");
+    const body = "Hello, S3!";
+    var req = try client.request(.PUT, uri, body);
+    defer req.deinit();
+
+    try std.testing.expect(req.headers.contains("authorization"));
+    try std.testing.expect(req.headers.contains("x-amz-content-sha256"));
+    try std.testing.expect(req.headers.contains("x-amz-date"));
+    try std.testing.expect(req.transfer_encoding.content_length == body.len);
+}
+
+test "S3Client error handling" {
+    const allocator = std.testing.allocator;
+
+    const config = S3Config{
+        .access_key_id = "test-key",
+        .secret_access_key = "test-secret",
+        .region = "us-east-1",
+    };
+
+    var client = try S3Client.init(allocator, config);
+    defer client.deinit();
+
+    const uri = try Uri.parse("https://example.s3.amazonaws.com/test.txt");
+    var req = try client.request(.GET, uri, null);
+    defer req.deinit();
+
+    // Test error mapping
+    switch (req.response.status) {
+        .unauthorized => try std.testing.expectError(S3Error.InvalidCredentials, S3Error.InvalidCredentials),
+        .forbidden => try std.testing.expectError(S3Error.InvalidCredentials, S3Error.InvalidCredentials),
+        .not_found => try std.testing.expectError(S3Error.BucketNotFound, S3Error.BucketNotFound),
+        else => {},
+    }
+}

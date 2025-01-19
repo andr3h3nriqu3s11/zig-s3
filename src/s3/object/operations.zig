@@ -133,3 +133,134 @@ test "object operations" {
 
     try deleteObject(test_client, "test-bucket", "test-key");
 }
+
+test "object operations error handling" {
+    const allocator = std.testing.allocator;
+
+    const config = client_impl.S3Config{
+        .access_key_id = "test-key",
+        .secret_access_key = "test-secret",
+        .region = "us-east-1",
+    };
+
+    var test_client = try S3Client.init(allocator, config);
+    defer test_client.deinit();
+
+    // Test object not found
+    try std.testing.expectError(
+        error.ObjectNotFound,
+        getObject(test_client, "test-bucket", "nonexistent-key"),
+    );
+
+    // Test invalid object key
+    const invalid_key = "";
+    try std.testing.expectError(
+        error.InvalidObjectKey,
+        putObject(test_client, "test-bucket", invalid_key, "test data"),
+    );
+}
+
+test "object operations with large data" {
+    const allocator = std.testing.allocator;
+
+    const config = client_impl.S3Config{
+        .access_key_id = "test-key",
+        .secret_access_key = "test-secret",
+        .region = "us-east-1",
+    };
+
+    var test_client = try S3Client.init(allocator, config);
+    defer test_client.deinit();
+
+    // Create large test data (1MB)
+    const data_size = 1024 * 1024;
+    var large_data = try allocator.alloc(u8, data_size);
+    defer allocator.free(large_data);
+
+    for (0..data_size) |i| {
+        large_data[i] = @as(u8, @truncate(i));
+    }
+
+    // Test large object operations
+    try putObject(test_client, "test-bucket", "large-file.bin", large_data);
+
+    const retrieved = try getObject(test_client, "test-bucket", "large-file.bin");
+    defer allocator.free(retrieved);
+
+    try std.testing.expectEqualSlices(u8, large_data, retrieved);
+
+    try deleteObject(test_client, "test-bucket", "large-file.bin");
+}
+
+test "object operations with custom endpoint" {
+    const allocator = std.testing.allocator;
+
+    const config = client_impl.S3Config{
+        .access_key_id = "test-key",
+        .secret_access_key = "test-secret",
+        .region = "us-east-1",
+        .endpoint = "http://localhost:9000",
+    };
+
+    var test_client = try S3Client.init(allocator, config);
+    defer test_client.deinit();
+
+    // Test object operations with custom endpoint
+    const test_data = "Testing with custom endpoint";
+    try putObject(test_client, "test-bucket", "custom-endpoint-test.txt", test_data);
+
+    const retrieved = try getObject(test_client, "test-bucket", "custom-endpoint-test.txt");
+    defer allocator.free(retrieved);
+
+    try std.testing.expectEqualStrings(test_data, retrieved);
+
+    try deleteObject(test_client, "test-bucket", "custom-endpoint-test.txt");
+}
+
+test "object key validation" {
+    const allocator = std.testing.allocator;
+
+    const config = client_impl.S3Config{
+        .access_key_id = "test-key",
+        .secret_access_key = "test-secret",
+        .region = "us-east-1",
+    };
+
+    var test_client = try S3Client.init(allocator, config);
+    defer test_client.deinit();
+
+    // Test various invalid object keys
+    const invalid_keys = [_][]const u8{
+        "", // Empty
+        "key\nwith\nnewlines", // Contains newlines
+        "key with\x00null", // Contains null byte
+        "a" ** 1025, // Too long (max is 1024)
+    };
+
+    for (invalid_keys) |key| {
+        try std.testing.expectError(
+            error.InvalidObjectKey,
+            putObject(test_client, "test-bucket", key, "test data"),
+        );
+    }
+
+    // Test valid object keys
+    const valid_keys = [_][]const u8{
+        "valid/key.txt",
+        "path/to/object.json",
+        "special-chars_!@#$%^&*().txt",
+        "unicode-✨.txt",
+    };
+
+    for (valid_keys) |key| {
+        const test_data = "Test data";
+        try putObject(test_client, "test-bucket", key, test_data);
+
+        const retrieved = try getObject(test_client, "test-bucket", key);
+        defer allocator.free(retrieved);
+
+        try std.testing.expectEqualStrings(test_data, retrieved);
+
+        try deleteObject(test_client, "test-bucket", key);
+    }
+}

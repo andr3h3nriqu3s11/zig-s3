@@ -85,3 +85,92 @@ test "bucket operations" {
     try createBucket(test_client, "test-bucket");
     try deleteBucket(test_client, "test-bucket");
 }
+
+test "bucket operations error handling" {
+    const allocator = std.testing.allocator;
+
+    const config = client_impl.S3Config{
+        .access_key_id = "test-key",
+        .secret_access_key = "test-secret",
+        .region = "us-east-1",
+    };
+
+    var test_client = try S3Client.init(allocator, config);
+    defer test_client.deinit();
+
+    // Test invalid bucket name
+    const invalid_bucket = "";
+    try std.testing.expectError(
+        error.InvalidBucketName,
+        createBucket(test_client, invalid_bucket),
+    );
+
+    // Test bucket not found
+    try std.testing.expectError(
+        error.BucketNotFound,
+        deleteBucket(test_client, "nonexistent-bucket"),
+    );
+}
+
+test "bucket operations with custom endpoint" {
+    const allocator = std.testing.allocator;
+
+    const config = client_impl.S3Config{
+        .access_key_id = "test-key",
+        .secret_access_key = "test-secret",
+        .region = "us-east-1",
+        .endpoint = "http://localhost:9000",
+    };
+
+    var test_client = try S3Client.init(allocator, config);
+    defer test_client.deinit();
+
+    // Test bucket operations with custom endpoint
+    const bucket_name = "test-bucket-local";
+    try createBucket(test_client, bucket_name);
+    try deleteBucket(test_client, bucket_name);
+}
+
+test "bucket name validation" {
+    const allocator = std.testing.allocator;
+
+    const config = client_impl.S3Config{
+        .access_key_id = "test-key",
+        .secret_access_key = "test-secret",
+        .region = "us-east-1",
+    };
+
+    var test_client = try S3Client.init(allocator, config);
+    defer test_client.deinit();
+
+    // Test various invalid bucket names
+    const invalid_names = [_][]const u8{
+        "", // Empty
+        "a", // Too short
+        "ab", // Too short
+        "ThisHasUpperCase", // Contains uppercase
+        "contains.period", // Contains period
+        "contains_underscore", // Contains underscore
+        "a" ** 64, // Too long
+    };
+
+    for (invalid_names) |name| {
+        try std.testing.expectError(
+            error.InvalidBucketName,
+            createBucket(test_client, name),
+        );
+    }
+
+    // Test valid bucket names
+    const valid_names = [_][]const u8{
+        "valid-bucket-name",
+        "another-valid-bucket",
+        "123-numeric-prefix",
+        "bucket-with-numbers-123",
+    };
+
+    for (valid_names) |name| {
+        try createBucket(test_client, name);
+        try deleteBucket(test_client, name);
+    }
+}

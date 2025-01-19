@@ -205,3 +205,33 @@ for details.
 
 - Built with Zig's standard library
 - Inspired by AWS SDK implementations
+
+## AWS Signature V4 Implementation
+
+This library includes a complete implementation of AWS Signature V4 signing
+process:
+
+1. **Canonical Request Creation**
+   - HTTP method
+   - Canonical URI
+   - Canonical query string
+   - Canonical headers (sorted)
+   - Signed headers
+   - Hashed payload (SHA256)
+
+2. **String to Sign Creation**
+   - Algorithm specification
+   - Request date
+   - Credential scope
+   - Hashed canonical request
+
+3. **Signature Calculation**
+   - Derived signing key
+   - HMAC-SHA256 operations
+   - Final signature
+
+4. **Security Features**
+   - Request timestamp validation
+   - Content hash validation
+   - Proper header canonicalization
+   - Memory-safe string handling

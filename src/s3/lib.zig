@@ -1,25 +1,25 @@
-/// S3 Client Library for Zig
-///
-/// This library provides a simple interface for interacting with Amazon S3 and S3-compatible services.
-/// It supports basic operations like creating/deleting buckets and uploading/downloading objects.
-///
-/// Basic usage:
-/// ```zig
-/// const S3Client = @import("s3").S3Client;
-/// const S3Config = @import("s3").S3Config;
-///
-/// // Initialize client
-/// var client = try S3Client.init(allocator, .{
-///     .access_key_id = "your-key",
-///     .secret_access_key = "your-secret",
-///     .region = "us-east-1",
-/// });
-/// defer client.deinit();
-///
-/// // Use the client
-/// try client.createBucket("my-bucket");
-/// try client.putObject("my-bucket", "hello.txt", "Hello, S3!");
-/// ```
+//! S3 Client Library for Zig
+//!
+//! This library provides a simple interface for interacting with Amazon S3 and S3-compatible services.
+//! It supports basic operations like creating/deleting buckets and uploading/downloading objects.
+//!
+//! Basic usage:
+//! ```zig
+//! const S3Client = @import("s3").S3Client;
+//! const S3Config = @import("s3").S3Config;
+//!
+//! // Initialize client
+//! var client = try S3Client.init(allocator, .{
+//!     .access_key_id = "your-key",
+//!     .secret_access_key = "your-secret",
+//!     .region = "us-east-1",
+//! });
+//! defer client.deinit();
+//!
+//! // Use the client
+//! try client.createBucket("my-bucket");
+//! try client.putObject("my-bucket", "hello.txt", "Hello, S3!");
+//! ```
 const std = @import("std");
 const client = @import("client/implementation.zig");
 const bucket_ops = @import("bucket/operations.zig");
@@ -46,7 +46,7 @@ pub const S3Error = error{
     InvalidObjectKey,
 };
 
-/// Re-export configuration type
+/// Configuration type for S3 client
 pub const S3Config = client.S3Config;
 
 /// Information about a bucket in S3
@@ -70,14 +70,14 @@ pub const S3Client = struct {
     /// Initialize a new S3 client with the given configuration.
     /// Memory is allocated for the client and must be freed with deinit.
     ///
-    /// Parameters:
-    ///   - allocator: Memory allocator for the client
-    ///   - config: S3 configuration including credentials
+    /// Arguments:
+    ///     allocator: Memory allocator for the client
+    ///     config: S3 configuration including credentials
     ///
     /// Returns: Initialized S3Client
     ///
     /// Errors:
-    ///   - OutOfMemory: If client allocation fails
+    ///     OutOfMemory: If client allocation fails
     pub fn init(allocator: std.mem.Allocator, config: S3Config) !S3Client {
         return S3Client{
             .inner = try client.S3Client.init(allocator, config),
@@ -90,13 +90,14 @@ pub const S3Client = struct {
         self.inner.deinit();
     }
 
-    // Re-export bucket operations as methods
-    /// Create a new bucket. See bucket/operations.zig for details.
+    /// Create a new bucket.
+    /// See bucket/operations.zig for details.
     pub fn createBucket(self: *S3Client, bucket_name: []const u8) !void {
         return bucket_ops.createBucket(self.inner, bucket_name);
     }
 
-    /// Delete an existing bucket. See bucket/operations.zig for details.
+    /// Delete an existing bucket.
+    /// See bucket/operations.zig for details.
     pub fn deleteBucket(self: *S3Client, bucket_name: []const u8) !void {
         return bucket_ops.deleteBucket(self.inner, bucket_name);
     }
@@ -107,26 +108,28 @@ pub const S3Client = struct {
     /// Returns: Slice of BucketInfo structs
     ///
     /// Errors:
-    ///   - InvalidCredentials: If authentication fails
-    ///   - InvalidResponse: If listing fails
-    ///   - ConnectionFailed: Network or connection issues
-    ///   - OutOfMemory: Memory allocation failure
+    ///     InvalidCredentials: If authentication fails
+    ///     InvalidResponse: If listing fails
+    ///     ConnectionFailed: Network or connection issues
+    ///     OutOfMemory: Memory allocation failure
     pub fn listBuckets(self: *S3Client) ![]BucketInfo {
         return bucket_ops.listBuckets(self.inner);
     }
 
-    // Re-export object operations as methods
-    /// Upload an object to S3. See object/operations.zig for details.
+    /// Upload an object to S3.
+    /// See object/operations.zig for details.
     pub fn putObject(self: *S3Client, bucket_name: []const u8, key: []const u8, data: []const u8) !void {
         return object_ops.putObject(self.inner, bucket_name, key, data);
     }
 
-    /// Download an object from S3. See object/operations.zig for details.
+    /// Download an object from S3.
+    /// See object/operations.zig for details.
     pub fn getObject(self: *S3Client, bucket_name: []const u8, key: []const u8) ![]const u8 {
         return object_ops.getObject(self.inner, bucket_name, key);
     }
 
-    /// Delete an object from S3. See object/operations.zig for details.
+    /// Delete an object from S3.
+    /// See object/operations.zig for details.
     pub fn deleteObject(self: *S3Client, bucket_name: []const u8, key: []const u8) !void {
         return object_ops.deleteObject(self.inner, bucket_name, key);
     }
@@ -134,17 +137,17 @@ pub const S3Client = struct {
     /// List objects in a bucket with optional filtering and pagination.
     /// Memory for the returned slice and its contents must be freed by the caller.
     ///
-    /// Parameters:
-    ///   - bucket_name: Name of the bucket to list
-    ///   - options: Optional parameters for filtering and pagination
+    /// Arguments:
+    ///     bucket_name: Name of the bucket to list
+    ///     options: Optional parameters for filtering and pagination
     ///
     /// Returns: Slice of ObjectInfo structs
     ///
     /// Errors:
-    ///   - BucketNotFound: If the bucket doesn't exist
-    ///   - InvalidResponse: If listing fails
-    ///   - ConnectionFailed: Network or connection issues
-    ///   - OutOfMemory: Memory allocation failure
+    ///     BucketNotFound: If the bucket doesn't exist
+    ///     InvalidResponse: If listing fails
+    ///     ConnectionFailed: Network or connection issues
+    ///     OutOfMemory: Memory allocation failure
     pub fn listObjects(self: *S3Client, bucket_name: []const u8, options: ListObjectsOptions) ![]ObjectInfo {
         return object_ops.listObjects(self.inner, bucket_name, options);
     }

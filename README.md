@@ -1,25 +1,48 @@
-# S3 Client for Zig
+# S3 Client for Zig 🚀
+
+[![Zig](https://img.shields.io/badge/Zig-0.13.0-orange.svg)](https://ziglang.org)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](https://github.com/algoflows/zig-s3)
 
 A simple and efficient S3 client library for Zig, supporting AWS S3 and
 S3-compatible services.
 
-## Features
+## 📑 Table of Contents
 
-- Basic S3 operations (create/delete buckets, upload/download objects)
-- AWS Signature V4 authentication
-- Support for custom endpoints (MinIO, LocalStack, etc.)
-- Pagination support for listing objects
-- Convenient upload helpers for different content types:
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [API Reference](#api-reference)
+- [Error Handling](#error-handling)
+- [Testing](#testing)
+- [Development](#development)
+- [Contributing](#contributing)
+- [Community](#community)
+- [License](#license)
+
+## ✨ Features
+
+- ✅ Basic S3 operations (create/delete buckets, upload/download objects)
+- 🔐 AWS Signature V4 authentication
+- 🔌 Support for custom endpoints (MinIO, LocalStack, etc.)
+- 📝 Pagination support for listing objects
+- 📦 Convenient upload helpers for different content types:
   - String content upload
   - JSON serialization and upload
   - File system file upload
-- Memory-safe implementation using Zig's standard library
-- Comprehensive test suite:
+- 🛡️ Memory-safe implementation using Zig's standard library
+- 🧪 Comprehensive test suite:
   - Unit tests for all components
   - Integration tests with MinIO
   - Test assets for real-world scenarios
 
-## Installation
+## 🔧 Prerequisites
+
+- Zig 0.13.0 or newer
+- For integration testing: Docker (optional, for running MinIO)
+
+## 📥 Installation
 
 Add the package to your `build.zig.zon`:
 
@@ -47,7 +70,7 @@ const s3_dep = b.dependency("s3", .{
 exe.addModule("s3", s3_dep.module("s3"));
 ```
 
-## Quick Start
+## 🚀 Quick Start
 
 ```zig
 const std = @import("std");
@@ -71,44 +94,13 @@ pub fn main() !void {
     // Create bucket
     try client.createBucket("my-bucket");
 
-    // Upload different types of content using the uploader helper
-    var uploader = client.uploader();
-
     // Upload string content
+    var uploader = client.uploader();
     try uploader.uploadString("my-bucket", "hello.txt", "Hello, S3!");
-
-    // Upload JSON data
-    const config = .{
-        .app_name = "example",
-        .version = "1.0.0",
-    };
-    try uploader.uploadJson("my-bucket", "config.json", config);
-
-    // Upload a file from the filesystem
-    try uploader.uploadFile("my-bucket", "data/image.jpg", "local/path/to/image.jpg");
-
-    // List objects with pagination
-    const objects = try client.listObjects("my-bucket", .{
-        .prefix = "data/",
-        .max_keys = 100,
-        .start_after = null, // For pagination
-    });
-    defer {
-        for (objects) |object| {
-            allocator.free(object.key);
-            allocator.free(object.last_modified);
-            allocator.free(object.etag);
-        }
-        allocator.free(objects);
-    }
-
-    // Download object
-    const data = try client.getObject("my-bucket", "hello.txt");
-    defer allocator.free(data);
 }
 ```
 
-## API Reference
+## 📚 API Reference
 
 ### S3Client
 
@@ -123,20 +115,20 @@ const client = try s3.S3Client.init(allocator, .{
 });
 ```
 
-### Bucket Operations
+### 🪣 Bucket Operations
 
 - `createBucket(bucket_name: []const u8) !void`
 - `deleteBucket(bucket_name: []const u8) !void`
 - `listBuckets() ![]BucketInfo`
 
-### Object Operations
+### 📦 Object Operations
 
 - `putObject(bucket_name: []const u8, key: []const u8, data: []const u8) !void`
 - `getObject(bucket_name: []const u8, key: []const u8) ![]const u8`
 - `deleteObject(bucket_name: []const u8, key: []const u8) !void`
 - `listObjects(bucket_name: []const u8, options: ListObjectsOptions) ![]ObjectInfo`
 
-### ObjectUploader
+### 📤 ObjectUploader
 
 A helper for uploading different types of content:
 
@@ -154,18 +146,19 @@ try uploader.uploadJson("my-bucket", "data.json", data);
 try uploader.uploadFile("my-bucket", "image.jpg", "path/to/local/image.jpg");
 ```
 
-## Error Handling
+## ⚠️ Error Handling
 
-The library uses Zig's error union type for robust error handling. Common errors
-include:
+The library uses Zig's error union type for robust error handling:
 
-- `S3Error.InvalidCredentials`: Invalid AWS credentials
-- `S3Error.BucketNotFound`: Requested bucket doesn't exist
-- `S3Error.ObjectNotFound`: Requested object doesn't exist
-- `S3Error.ConnectionFailed`: Network or connection issues
-- `S3Error.InvalidResponse`: Unexpected response from S3 service
+| Error Type                   | Description                         |
+| ---------------------------- | ----------------------------------- |
+| `S3Error.InvalidCredentials` | Invalid AWS credentials             |
+| `S3Error.BucketNotFound`     | Requested bucket doesn't exist      |
+| `S3Error.ObjectNotFound`     | Requested object doesn't exist      |
+| `S3Error.ConnectionFailed`   | Network or connection issues        |
+| `S3Error.InvalidResponse`    | Unexpected response from S3 service |
 
-## Testing
+## 🧪 Testing
 
 ### Unit Tests
 
@@ -194,27 +187,35 @@ zig build integration-test
 See `tests/integration/README.md` for detailed information about the integration
 tests.
 
-## Development
+## 🛠️ Development
 
 - Written in Zig 0.13.0
 - Uses only standard library (no external dependencies)
 - Memory safe with proper allocation and cleanup
 - Follows Zig style guide and best practices
 
-## Contributing
+## 🤝 Contributing
 
 1. Fork the repository
-2. Create your feature branch
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
 4. Add tests for your changes
 5. Run the test suite
 6. Create a pull request
 
-## License
+## 👥 Community
 
-MIT License - see LICENSE file for details.
+- 📫 Report issues on
+  [GitHub Issues](https://github.com/algoflows/zig-s3/issues)
+- 💬 Join discussions in
+  [GitHub Discussions](https://github.com/algoflows/zig-s3/discussions)
+- 🌟 Star the repository if you find it helpful!
 
-## Acknowledgments
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
 
 - AWS S3 Documentation
 - MinIO Documentation

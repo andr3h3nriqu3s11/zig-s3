@@ -1,0 +1,13 @@
+.{
+    .name = "s3-client",
+    .version = "0.1.0",
+    .minimum_zig_version = "0.11.0",
+    .dependencies = .{},
+    .paths = .{
+        "src",
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+        "README.md",
+    },
+}

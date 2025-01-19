@@ -1,0 +1,15 @@
+zig-cache/
+zig-out/
+/release/
+/debug/
+/build/
+/build-*/
+*.o
+*.exe
+*.pdb
+*.obj
+*.lib
+*.dll
+*.so
+*.dylib
+*.a

@@ -10,28 +10,26 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Needed for creating releases
+    env:
+      VERSION: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Fetch all history for tags
 
-      - name: Get version from tag
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
-
       - name: Create Release Archive
+        id: archive
         run: |
           mkdir -p archive
-          git archive --format=tar.gz --prefix=zig-s3-${{ env.VERSION }}/ -o archive/v${{ env.VERSION }}.tar.gz HEAD
-          echo "HASH=$(shasum -a 256 archive/v${{ env.VERSION }}.tar.gz | cut -d ' ' -f 1)" >> $GITHUB_ENV
+          git archive --format=tar.gz --prefix=zig-s3-${VERSION#v}/ -o archive/${VERSION}.tar.gz HEAD
+          echo "hash=$(shasum -a 256 archive/${VERSION}.tar.gz | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          name: Release v${{ env.VERSION }}
+          name: ${{ env.VERSION }}
           body: |
-            Release v${{ env.VERSION }}
+            Release ${{ env.VERSION }}
 
             ## Installation
             Add to your `build.zig.zon`:
@@ -39,23 +37,23 @@ jobs:
             .{
                 .dependencies = .{
                     .s3 = .{
-                        .url = "https://github.com/${{ github.repository }}/archive/v${{ env.VERSION }}.tar.gz",
-                        .hash = "1220${{ env.HASH }}",
+                        .url = "https://github.com/${{ github.repository }}/archive/${{ env.VERSION }}.tar.gz",
+                        .hash = "1220${{ steps.archive.outputs.hash }}",
                     },
                 },
             }
             ```
 
             See CHANGELOG.md for full release notes.
-          files: archive/v${{ env.VERSION }}.tar.gz
+          files: archive/${{ env.VERSION }}.tar.gz
           draft: false
           prerelease: false
 
       - name: Update README Hash
         run: |
-          sed -i "s/\.hash = \".*\"/\.hash = \"1220${{ env.HASH }}\"/" README.md
+          sed -i "s/\.hash = \".*\"/\.hash = \"1220${{ steps.archive.outputs.hash }}\"/" README.md
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add README.md
-          git commit -m "Update hash in README for v${{ env.VERSION }}"
+          git commit -m "Update hash in README for ${{ env.VERSION }}"
           git push 

@@ -38,25 +38,30 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the example application");
     run_step.dependOn(&run_cmd.step);
 
-    // Add tests
-    const lib_tests = b.addTest(.{
+    // Unit tests
+    const unit_tests = b.addTest(.{
         .root_source_file = b.path("src/s3/lib.zig"),
         .target = target,
         .optimize = optimize,
     });
-
+    const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&b.addRunArtifact(lib_tests).step);
+    test_step.dependOn(&run_unit_tests.step);
 
-    // Add documentation
-    const docs = b.addInstallDirectory(.{
-        .source_dir = lib.getEmittedDocs(),
-        .install_dir = .prefix,
-        .install_subdir = "docs",
+    // Integration tests
+    const integration_tests = b.addTest(.{
+        .root_source_file = b.path("tests/integration/s3_client_test.zig"),
+        .target = target,
+        .optimize = optimize,
     });
+    integration_tests.root_module.addImport("s3", s3_module);
 
-    const docs_step = b.step("docs", "Generate library documentation");
-    docs_step.dependOn(&docs.step);
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+    const integration_test_step = b.step("integration-test", "Run integration tests");
+    integration_test_step.dependOn(&run_integration_tests.step);
+
+    // Add integration tests to main test step
+    test_step.dependOn(&run_integration_tests.step);
 
     // Add formatting
     const fmt = b.addFmt(.{

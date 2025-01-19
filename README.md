@@ -9,8 +9,15 @@ S3-compatible services.
 - AWS Signature V4 authentication
 - Support for custom endpoints (MinIO, LocalStack, etc.)
 - Pagination support for listing objects
-- Convenient upload helpers for different content types
+- Convenient upload helpers for different content types:
+  - String content upload
+  - JSON serialization and upload
+  - File system file upload
 - Memory-safe implementation using Zig's standard library
+- Comprehensive test suite:
+  - Unit tests for all components
+  - Integration tests with MinIO
+  - Test assets for real-world scenarios
 
 ## Installation
 
@@ -22,11 +29,22 @@ Add the package to your `build.zig.zon`:
     .version = "0.1.0",
     .dependencies = .{
         .s3 = .{
-            .url = "https://github.com/your-username/zig-s3/archive/v0.1.0.tar.gz",
+            .url = "https://github.com/ziglibs/zig-s3/archive/v0.2.0.tar.gz",
+            // Don't forget to update hash after publishing
             .hash = "...",
         },
     },
 }
+```
+
+Then in your `build.zig`:
+
+```zig
+const s3_dep = b.dependency("s3", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.addModule("s3", s3_dep.module("s3"));
 ```
 
 ## Quick Start
@@ -45,6 +63,8 @@ pub fn main() !void {
         .access_key_id = "your-key",
         .secret_access_key = "your-secret",
         .region = "us-east-1",
+        // Optional: Use with MinIO or other S3-compatible services
+        // .endpoint = "http://localhost:9000",
     });
     defer client.deinit();
 
@@ -67,10 +87,11 @@ pub fn main() !void {
     // Upload a file from the filesystem
     try uploader.uploadFile("my-bucket", "data/image.jpg", "local/path/to/image.jpg");
 
-    // List objects
+    // List objects with pagination
     const objects = try client.listObjects("my-bucket", .{
         .prefix = "data/",
         .max_keys = 100,
+        .start_after = null, // For pagination
     });
     defer {
         for (objects) |object| {
@@ -146,11 +167,48 @@ include:
 
 ## Testing
 
-Run the test suite:
+### Unit Tests
+
+Run the unit test suite:
 
 ```bash
-zig test src/main.zig
+zig build test
 ```
+
+### Integration Tests
+
+Integration tests require a running MinIO instance:
+
+1. Start MinIO:
+
+```bash
+docker run -p 9000:9000 minio/minio server /data
+```
+
+2. Run integration tests:
+
+```bash
+zig build integration-test
+```
+
+See `tests/integration/README.md` for detailed information about the integration
+tests.
+
+## Development
+
+- Written in Zig 0.13.0
+- Uses only standard library (no external dependencies)
+- Memory safe with proper allocation and cleanup
+- Follows Zig style guide and best practices
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch
+3. Make your changes
+4. Add tests for your changes
+5. Run the test suite
+6. Create a pull request
 
 ## License
 

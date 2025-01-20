@@ -4,53 +4,66 @@ const Allocator = std.mem.Allocator;
 const fmt = std.fmt;
 const time = std.time;
 
-/// Format timestamp as required by AWS (YYYYMMDD'T'HHMMSS'Z')
-pub fn formatAmzDateTime(allocator: Allocator, timestamp: i64) ![]const u8 {
-    const epoch_seconds = @as(u64, @intCast(timestamp));
-    const epoch_days = epoch_seconds / (24 * 60 * 60);
-    const day_seconds = epoch_seconds % (24 * 60 * 60);
+/// Format timestamp as YYYYMMDD for AWS date
+pub fn formatDate(allocator: Allocator, timestamp: i64) ![]const u8 {
+    const seconds = @as(u64, @intCast(timestamp));
+    const epoch_seconds = seconds;
+    const epoch_days = @divFloor(epoch_seconds, 86400);
+    var days = @as(u32, @intCast(epoch_days));
 
-    const year = @as(u16, @intCast(1970 + epoch_days / 365));
-    var remaining_days = @as(u16, @intCast(epoch_days % 365));
-
-    // Adjust for leap years
-    var leap_days: u16 = 0;
-    var y: u16 = 1970;
-    while (y < year) : (y += 1) {
-        if (isLeapYear(y)) {
-            leap_days += 1;
-        }
+    // Calculate year, month, day
+    var year: u32 = 1970;
+    while (days >= 365) {
+        const is_leap = (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0);
+        const days_in_year = if (is_leap) @as(u32, 366) else @as(u32, 365);
+        if (days < days_in_year) break;
+        days -= days_in_year;
+        year += 1;
     }
-    remaining_days -= leap_days;
 
-    // Calculate month and day
-    const days_in_month = [_]u8{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    var month: u8 = 1;
-    var day = remaining_days + 1;
+    const month_days = [_]u8{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    var month: u32 = 1;
+    const is_leap = (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0);
 
-    for (days_in_month) |days| {
-        if (day <= days) break;
-        day -= days;
+    for (month_days, 0..) |days_in_month, i| {
+        var adjusted_days = days_in_month;
+        if (i == 1 and is_leap) adjusted_days += 1;
+        if (days < adjusted_days) break;
+        days -= adjusted_days;
         month += 1;
     }
 
-    // Calculate hours, minutes, seconds
-    const hours = @as(u8, @intCast(day_seconds / 3600));
-    const minutes = @as(u8, @intCast((day_seconds % 3600) / 60));
-    const seconds = @as(u8, @intCast(day_seconds % 60));
+    const day = days + 1;
 
+    // Format as YYYYMMDD
     return fmt.allocPrint(
         allocator,
-        "{d:0>4}{d:0>2}{d:0>2}T{d:0>2}{d:0>2}{d:0>2}Z",
-        .{ year, month, day, hours, minutes, seconds },
+        "{d:0>4}{d:0>2}{d:0>2}",
+        .{ year, month, day },
     );
 }
 
-/// Format date as required by AWS (YYYYMMDD)
+/// Format timestamp as YYYYMMDD'T'HHMMSS'Z' for AWS
+pub fn formatAmzDateTime(allocator: Allocator, timestamp: i64) ![]const u8 {
+    const date = try formatDate(allocator, timestamp);
+    defer allocator.free(date);
+
+    const seconds = @as(u64, @intCast(timestamp));
+    const day_seconds = @mod(seconds, 86400);
+    const hour = @divFloor(day_seconds, 3600);
+    const minute = @divFloor(@mod(day_seconds, 3600), 60);
+    const second = @mod(day_seconds, 60);
+
+    return fmt.allocPrint(
+        allocator,
+        "{s}T{d:0>2}{d:0>2}{d:0>2}Z",
+        .{ date, hour, minute, second },
+    );
+}
+
+/// Format timestamp as YYYYMMDD for AWS credential scope
 pub fn formatAmzDate(allocator: Allocator, timestamp: i64) ![]const u8 {
-    const datetime = try formatAmzDateTime(allocator, timestamp);
-    defer allocator.free(datetime);
-    return allocator.dupe(u8, datetime[0..8]); // First 8 characters (YYYYMMDD)
+    return formatDate(allocator, timestamp);
 }
 
 /// Check if a year is a leap year

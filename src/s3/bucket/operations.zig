@@ -5,6 +5,7 @@ const Allocator = std.mem.Allocator;
 const http = std.http;
 const Uri = std.Uri;
 const fmt = std.fmt;
+const log = std.log;
 
 const lib = @import("../lib.zig");
 const client_impl = @import("../client/implementation.zig");
@@ -92,22 +93,42 @@ pub const BucketInfo = struct {
 ///   - ConnectionFailed: Network or connection issues
 ///   - OutOfMemory: Memory allocation failure
 pub fn listBuckets(self: *S3Client) ![]BucketInfo {
-    const endpoint = if (self.config.endpoint) |ep| ep else try fmt.allocPrint(self.allocator, "https://s3.{s}.amazonaws.com", .{self.config.region});
+    log.debug("Starting listBuckets operation", .{});
+
+    const endpoint = if (self.config.endpoint) |ep|
+        ep
+    else
+        try fmt.allocPrint(self.allocator, "https://s3.{s}.amazonaws.com", .{self.config.region});
     defer if (self.config.endpoint == null) self.allocator.free(endpoint);
 
+    log.debug("Requesting list of buckets from endpoint: {s}", .{endpoint});
     var req = try self.request(.GET, try Uri.parse(endpoint), null);
     defer req.deinit();
 
-    if (req.response.status != .ok) {
-        return S3Error.InvalidResponse;
+    switch (req.response.status) {
+        .ok => {},
+        .unauthorized, .forbidden => {
+            log.err("Authentication failed: {}", .{req.response.status});
+            return S3Error.InvalidCredentials;
+        },
+        .bad_request => {
+            log.err("Bad request: {}", .{req.response.status});
+            return S3Error.InvalidResponse;
+        },
+        else => {
+            log.err("Unexpected response status: {}", .{req.response.status});
+            return S3Error.InvalidResponse;
+        },
     }
 
-    // Read response body
+    log.debug("Reading response body", .{});
     const max_size = 1024 * 1024; // 1MB max response size
     const body = try req.reader().readAllAlloc(self.allocator, max_size);
     defer self.allocator.free(body);
 
-    // Parse XML response
+    log.debug("Raw response: {s}", .{body});
+
+    log.debug("Parsing XML response", .{});
     var buckets = std.ArrayList(BucketInfo).init(self.allocator);
     errdefer {
         for (buckets.items) |bucket| {
@@ -117,20 +138,21 @@ pub fn listBuckets(self: *S3Client) ![]BucketInfo {
         buckets.deinit();
     }
 
-    // Simple XML parsing - look for <Bucket> elements
     var it = std.mem.split(u8, body, "<Bucket>");
     _ = it.first(); // Skip first part before any <Bucket>
 
     while (it.next()) |bucket_xml| {
-        // Extract name
+        log.debug("Processing bucket XML: {s}", .{bucket_xml});
+
         const name_start = std.mem.indexOf(u8, bucket_xml, "<Name>") orelse continue;
         const name_end = std.mem.indexOf(u8, bucket_xml, "</Name>") orelse continue;
         const name = try self.allocator.dupe(u8, bucket_xml[name_start + 6 .. name_end]);
+        log.debug("Found bucket: {s}", .{name});
 
-        // Extract creation date
         const date_start = std.mem.indexOf(u8, bucket_xml, "<CreationDate>") orelse continue;
         const date_end = std.mem.indexOf(u8, bucket_xml, "</CreationDate>") orelse continue;
         const date = try self.allocator.dupe(u8, bucket_xml[date_start + 14 .. date_end]);
+        log.debug("Bucket creation date: {s}", .{date});
 
         try buckets.append(.{
             .name = name,
@@ -138,6 +160,7 @@ pub fn listBuckets(self: *S3Client) ![]BucketInfo {
         });
     }
 
+    log.info("Found {} buckets total", .{buckets.items.len});
     return buckets.toOwnedSlice();
 }
 

@@ -29,74 +29,70 @@
 /// - S3_ENDPOINT: Custom endpoint URL (default: "http://localhost:9000")
 const std = @import("std");
 const s3 = @import("s3/lib.zig");
+const dotenv = @import("dotenv");
+
+fn loadEnvVars() !s3.S3Config {
+    const heapAlloc = std.heap.page_allocator;
+
+    const env_map = try dotenv.getDataFrom(heapAlloc, ".env");
+
+    const access_key = env_map.get("MINIO_ACCESS_KEY") orelse
+        return error.MissingAccessKey;
+    const secret_key = env_map.get("MINIO_SECRET_KEY") orelse
+        return error.MissingSecretKey;
+    const endpoint = env_map.get("MINIO_PUBLIC_ENDPOINT") orelse
+        return error.MissingEndpoint;
+
+    return s3.S3Config{
+        .access_key_id = access_key.?,
+        .secret_access_key = secret_key.?,
+        .region = "us-west-1",
+        .endpoint = endpoint.?,
+    };
+}
 
 pub fn main() !void {
     // Get allocator
+    std.log.info("Initializing GeneralPurposeAllocator", .{});
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    defer if (gpa.deinit() == .leak) {
+        std.log.warn("Memory allocator leaked", .{});
+    };
     const allocator = gpa.allocator();
 
     // Initialize S3 client
-    var client = try s3.S3Client.init(allocator, .{
-        .access_key_id = "your-access-key",
-        .secret_access_key = "your-secret-key",
-        .region = "us-east-1",
-        // Uncomment to use with MinIO or other S3-compatible services
-        // .endpoint = "http://localhost:9000",
-    });
+    std.log.info("Loading environment variables for S3 configuration", .{});
+    const config = try loadEnvVars();
+    std.log.info("Environment variables loaded successfully", .{});
+
+    std.log.info("Initializing S3 client", .{});
+    var client = try s3.S3Client.init(allocator, config);
     defer client.deinit();
+    std.log.info("S3 client initialized successfully", .{});
 
-    // Create a bucket
-    const bucket_name = "example-bucket";
-    try client.createBucket(bucket_name);
-
-    // Create an uploader helper
-    var uploader = client.uploader();
-
-    // Upload different types of content
-    try uploader.uploadString(bucket_name, "hello.txt", "Hello, S3!");
-
-    const config = .{
-        .app_name = "s3-example",
-        .version = "1.0.0",
-        .timestamp = @as(i64, @intCast(std.time.timestamp())),
+    // List buckets
+    std.log.info("Listing S3 buckets", .{});
+    const buckets = client.listBuckets() catch |err| {
+        std.log.err("Failed to list buckets: {}", .{err});
+        return err;
     };
-    try uploader.uploadJson(bucket_name, "config.json", config);
-
-    // List objects in the bucket
-    const objects = try client.listObjects(bucket_name, .{
-        .prefix = null,
-        .max_keys = 10,
-    });
+    std.log.info("Buckets listed successfully", .{});
     defer {
-        for (objects) |object| {
-            allocator.free(object.key);
-            allocator.free(object.last_modified);
-            allocator.free(object.etag);
+        std.log.info("Freeing bucket resources", .{});
+        for (buckets) |bucket| {
+            allocator.free(bucket.name);
+            allocator.free(bucket.creation_date);
         }
-        allocator.free(objects);
+        allocator.free(buckets);
+        std.log.info("Bucket resources freed", .{});
     }
 
-    // Print object information
+    // Print bucket information
     const stdout = std.io.getStdOut().writer();
-    try stdout.writeAll("\nObjects in bucket:\n");
-    for (objects) |object| {
-        try stdout.print("- {s} ({d} bytes)\n", .{ object.key, object.size });
+    try stdout.writeAll("\nAvailable buckets:\n");
+    for (buckets) |bucket| {
+        std.log.info("Bucket found: {s}", .{bucket.name});
+        try stdout.print("- {s}\n", .{bucket.name});
     }
-
-    // Clean up
-    for (objects) |object| {
-        try client.deleteObject(bucket_name, object.key);
-    }
-    try client.deleteBucket(bucket_name);
-}
-
-/// Helper function to get environment variables with default values.
-/// Uses the page allocator since values are needed for the entire program lifetime.
-fn getEnvVarOrDefault(name: []const u8, default: []const u8) ![]const u8 {
-    const value = std.process.getEnvVarOwned(std.heap.page_allocator, name) catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => return default,
-        else => return err,
-    };
-    return value;
+    std.log.info("Bucket information printed", .{});
 }

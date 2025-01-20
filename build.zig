@@ -9,6 +9,12 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/s3/lib.zig"),
     });
 
+    // dotenv library
+    const dotenv_dep = b.dependency("dotenv", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Create the library that others can use as a dependency
     const lib = b.addStaticLibrary(.{
         .name = "s3-client",
@@ -17,6 +23,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     lib.root_module.addImport("s3", s3_module);
+    lib.root_module.addImport("dotenv", dotenv_dep.module("dotenv"));
     b.installArtifact(lib);
 
     // Create the example executable
@@ -27,6 +34,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe.root_module.addImport("s3", s3_module);
+    exe.root_module.addImport("dotenv", dotenv_dep.module("dotenv"));
     b.installArtifact(exe);
 
     // Create "run" step for the example
@@ -44,6 +52,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    unit_tests.root_module.addImport("dotenv", dotenv_dep.module("dotenv"));
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_unit_tests.step);
@@ -55,6 +64,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     integration_tests.root_module.addImport("s3", s3_module);
+    integration_tests.root_module.addImport("dotenv", dotenv_dep.module("dotenv"));
 
     const run_integration_tests = b.addRunArtifact(integration_tests);
     const integration_test_step = b.step("integration-test", "Run integration tests");

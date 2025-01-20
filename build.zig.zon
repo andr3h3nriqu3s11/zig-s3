@@ -2,7 +2,12 @@
     .name = "zig-s3",
     .version = "0.2.0",
     .minimum_zig_version = "0.13.0",
-    .dependencies = .{},
+    .dependencies = .{
+        .dotenv = .{
+            .url = "https://github.com/dying-will-bullet/dotenv/archive/refs/tags/v0.2.0.tar.gz",
+            .hash = "12201347c20e8c4cb161f16bba30e51da17c32b89ef887b9b8932d6ed135ee5a6d01",
+        },
+    },
     .paths = .{
         // Only include necessary files in the package
         "src/",

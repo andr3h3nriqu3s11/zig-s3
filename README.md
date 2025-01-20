@@ -1,3 +1,7 @@
+# Under Construction
+
+This project is currently under construction and subject to changes.
+
 # S3 Client for Zig 🚀
 
 [![Zig](https://img.shields.io/badge/Zig-0.13.0-orange.svg)](https://ziglang.org)

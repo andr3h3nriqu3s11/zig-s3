@@ -40,5 +40,12 @@ and this project adheres to
 - Basic error handling
 - Initial documentation
 
+## [0.3.0] - 2024-04-XX
+
+### Note
+
+- The project is currently under construction and subject to changes.
+
 [0.2.0]: https://github.com/username/zig-s3/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/username/zig-s3/releases/tag/v0.1.0
+[0.3.0]: https://github.com/username/zig-s3/compare/v0.2.0...v0.3.0

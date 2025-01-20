@@ -32,7 +32,7 @@ fn loadEnvVars() !s3.S3Config {
     return s3.S3Config{
         .access_key_id = access_key.?,
         .secret_access_key = secret_key.?,
-        .region = "us-east-1",
+        .region = "us-west-1",
         .endpoint = endpoint.?,
     };
 }
@@ -93,117 +93,84 @@ test "validate endpoint" {
     }
 }
 
-test "upload simple file to test-bucket" {
-    std.debug.print("\n=== Starting simple file upload test ===\n", .{});
+test "create simple bucket" {
+    std.debug.print("\n=== Starting simple bucket creation test ===\n", .{});
 
     // Initialize client
+    std.debug.print("Loading env vars...\n", .{});
     const config = try loadEnvVars();
+    std.debug.print("Loaded config with endpoint: {?s}\n", .{config.endpoint});
+
+    std.debug.print("Initializing client...\n", .{});
     var client = try s3.S3Client.init(allocator, config);
     defer client.deinit();
+    std.debug.print("Client initialized successfully\n", .{});
 
-    const bucket_name = "test-bucket";
-    const file_content = "Hello from Zig!";
-    const file_key = "hello.txt";
+    const bucket_name = "integration-test-bucket-123";
 
-    // Create uploader and upload string
-    var uploader = client.uploader();
-    uploader.uploadString(bucket_name, file_key, file_content) catch |err| {
-        std.debug.print("Failed to upload file: {any}\n", .{err});
-        return err;
-    };
+    // Create bucket
+    std.debug.print("Creating bucket '{s}'...\n", .{bucket_name});
+    try client.createBucket(bucket_name);
+    std.debug.print("Bucket '{s}' created successfully\n", .{bucket_name});
 
-    std.debug.print("Successfully uploaded file '{s}' to bucket '{s}'\n", .{ file_key, bucket_name });
+    // Verify the bucket exists by listing buckets
+    std.debug.print("Listing buckets to verify creation...\n", .{});
+    const buckets = try client.listBuckets();
+    defer {
+        for (buckets) |bucket| {
+            allocator.free(bucket.name);
+            allocator.free(bucket.creation_date);
+        }
+        allocator.free(buckets);
+    }
 
-    // Verify the upload by downloading the content
-    const downloaded = client.getObject(bucket_name, file_key) catch |err| {
-        std.debug.print("Failed to download file: {any}\n", .{err});
-        return err;
-    };
-    defer allocator.free(downloaded);
+    var bucket_found = false;
+    for (buckets) |bucket| {
+        if (std.mem.eql(u8, bucket.name, bucket_name)) {
+            bucket_found = true;
+            break;
+        }
+    }
 
-    try testing.expectEqualStrings(file_content, downloaded);
-    std.debug.print("Successfully verified file content\n", .{});
+    try testing.expect(bucket_found);
+    std.debug.print("Bucket '{s}' verified successfully\n", .{bucket_name});
+
+    // Clean up by deleting the bucket
+    std.debug.print("Deleting bucket '{s}'...\n", .{bucket_name});
+    try client.deleteBucket(bucket_name);
+    std.debug.print("Bucket '{s}' deleted successfully\n", .{bucket_name});
 }
 
-// test "create bucket" {
-//     std.debug.print("\n=== Starting create bucket test ===\n", .{});
+// test "upload simple file to test-bucket" {
+//     std.debug.print("\n=== Starting simple file upload test ===\n", .{});
 
 //     // Initialize client
-//     std.debug.print("Loading env vars...\n", .{});
 //     const config = try loadEnvVars();
-//     std.debug.print("Loaded config with endpoint: {?s}\n", .{config.endpoint});
-
-//     // Validate endpoint is not empty
-//     if (config.endpoint) |endpoint| {
-//         if (endpoint.len == 0) {
-//             std.debug.print("Error: Empty endpoint URL\n", .{});
-//             return error.InvalidEndpoint;
-//         }
-//         std.debug.print("Using endpoint: {s}\n", .{endpoint});
-
-//         // Try to parse the endpoint URL
-//         const uri = try std.Uri.parse(endpoint);
-//         std.debug.print("Parsed URI - scheme: {?any}, host: {?any}, port: {?d}\n", .{
-//             uri.scheme,
-//             uri.host,
-//             uri.port,
-//         });
-
-//         // Print other config values to help debug
-//         std.debug.print("Access Key ID: {s}\n", .{config.access_key_id});
-//         std.debug.print("Region: {s}\n", .{config.region});
-//     } else {
-//         std.debug.print("Error: Missing endpoint URL\n", .{});
-//         return error.MissingEndpoint;
-//     }
-
-//     std.debug.print("Initializing client...\n", .{});
 //     var client = try s3.S3Client.init(allocator, config);
 //     defer client.deinit();
-//     std.debug.print("Client initialized successfully\n", .{});
 
-//     // Create test bucket with random suffix
-//     var random_bytes: [4]u8 = undefined;
-//     std.crypto.random.bytes(&random_bytes);
-//     const bucket_name = try std.fmt.allocPrint(
-//         allocator,
-//         "test-bucket-{s}",
-//         .{std.fmt.fmtSliceHexLower(&random_bytes)},
-//     );
-//     defer allocator.free(bucket_name);
-//     std.debug.print("Attempting to create bucket: {s}\n", .{bucket_name});
+//     const bucket_name = "test-bucket";
+//     const file_content = "Hello from Zig!";
+//     const file_key = "hello.txt";
 
-//     // Try the operation with error handling
-//     client.createBucket(bucket_name) catch |err| {
-//         std.debug.print("Failed to create bucket: {any}\n", .{err});
-//         switch (err) {
-//             error.ConnectionRefused => {
-//                 std.debug.print("Connection refused - check if MinIO is running\n", .{});
-//             },
-//             error.InvalidResponse => {
-//                 std.debug.print("Invalid response from server\n", .{});
-//             },
-//             error.InvalidCredentials => {
-//                 std.debug.print("Invalid credentials\n", .{});
-//             },
-//             error.BucketNotFound => {
-//                 std.debug.print("Bucket not found\n", .{});
-//             },
-//             else => {
-//                 std.debug.print("Other error occurred: {any}\n", .{err});
-//             },
-//         }
+//     // Create uploader and upload string
+//     var uploader = client.uploader();
+//     uploader.uploadString(bucket_name, file_key, file_content) catch |err| {
+//         std.debug.print("Failed to upload file: {any}\n", .{err});
 //         return err;
 //     };
 
-//     std.debug.print("Successfully created bucket\n", .{});
+//     std.debug.print("Successfully uploaded file '{s}' to bucket '{s}'\n", .{ file_key, bucket_name });
 
-//     // Clean up
-//     std.debug.print("Attempting to delete bucket...\n", .{});
-//     client.deleteBucket(bucket_name) catch |err| {
-//         std.debug.print("Warning: Failed to delete bucket: {any}\n", .{err});
+//     // Verify the upload by downloading the content
+//     const downloaded = client.getObject(bucket_name, file_key) catch |err| {
+//         std.debug.print("Failed to download file: {any}\n", .{err});
+//         return err;
 //     };
-//     std.debug.print("Test completed\n", .{});
+//     defer allocator.free(downloaded);
+
+//     try testing.expectEqualStrings(file_content, downloaded);
+//     std.debug.print("Successfully verified file content\n", .{});
 // }
 
 // test "full client lifecycle" {

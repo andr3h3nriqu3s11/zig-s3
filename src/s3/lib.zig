@@ -44,6 +44,14 @@ pub const S3Error = error{
     OutOfMemory,
     /// Invalid object key
     InvalidObjectKey,
+    /// Bucket already exists
+    BucketAlreadyExists,
+    /// Invalid bucket name
+    InvalidBucketName,
+    /// Access denied
+    AccessDenied,
+    /// Service unavailable
+    ServiceUnavailable,
 };
 
 /// Configuration type for S3 client

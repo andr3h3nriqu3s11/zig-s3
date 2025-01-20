@@ -26,18 +26,46 @@ const S3Client = client_impl.S3Client;
 ///   - ConnectionFailed: Network or connection issues
 ///   - OutOfMemory: Memory allocation failure
 pub fn createBucket(self: *S3Client, bucket_name: []const u8) !void {
+    std.debug.print("Creating bucket: {s}\n", .{bucket_name});
+
     const endpoint = if (self.config.endpoint) |ep| ep else try fmt.allocPrint(self.allocator, "https://s3.{s}.amazonaws.com", .{self.config.region});
     defer if (self.config.endpoint == null) self.allocator.free(endpoint);
+    std.debug.print("Using endpoint: {s}\n", .{endpoint});
 
     const uri_str = try fmt.allocPrint(self.allocator, "{s}/{s}", .{ endpoint, bucket_name });
     defer self.allocator.free(uri_str);
+    std.debug.print("Constructed URI: {s}\n", .{uri_str});
 
     var req = try self.request(.PUT, try Uri.parse(uri_str), null);
     defer req.deinit();
+    std.debug.print("Sent PUT request to create bucket\n", .{});
 
-    if (req.response.status != .created) {
-        return S3Error.InvalidResponse;
+    if (req.response.status != .ok and req.response.status != .created) {
+        switch (req.response.status) {
+            .conflict => {
+                std.debug.print("Bucket already exists: {s}\n", .{bucket_name});
+                return S3Error.BucketAlreadyExists;
+            },
+            .bad_request => {
+                std.debug.print("Invalid bucket name: {s}\n", .{bucket_name});
+                return S3Error.InvalidBucketName;
+            },
+            .forbidden => {
+                std.debug.print("Access denied: {s}\n", .{bucket_name});
+                return S3Error.AccessDenied;
+            },
+            .service_unavailable => {
+                std.debug.print("Service unavailable: {s}\n", .{bucket_name});
+                return S3Error.ServiceUnavailable;
+            },
+            else => {
+                std.debug.print("Failed to create bucket: {s}, status: {}\n", .{ bucket_name, req.response.status });
+                return S3Error.InvalidResponse;
+            },
+        }
     }
+
+    std.debug.print("Bucket created successfully: {s}\n", .{bucket_name});
 }
 
 /// Delete an existing bucket from S3.

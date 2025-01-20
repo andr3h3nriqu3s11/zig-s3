@@ -92,35 +92,82 @@ pub const S3Client = struct {
     ) !http.Client.Request {
         log.debug("Starting S3 request: method={s}", .{@tagName(method)});
 
-        // Allocate auth header value
-        const auth_header = try std.fmt.allocPrint(self.allocator, "AWS4-HMAC-SHA256 Credential={s}/20250120/us-west-1/s3/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=65ae93f165b90008f5f1af47e5874eb6e07cb2bc2433e9330be45b82685fb1fb", .{self.config.access_key_id});
-        defer self.allocator.free(auth_header);
-
-        var server_header_buffer: [8192]u8 = undefined;
-        var req = try self.http_client.open(method, uri, .{
-            .server_header_buffer = &server_header_buffer,
-            .extra_headers = &[_]http.Header{
-                .{ .name = "Accept", .value = "application/xml" },
-                .{ .name = "x-amz-content-sha256", .value = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
-                .{ .name = "x-amz-date", .value = "20250120T224408Z" },
-                .{ .name = "Authorization", .value = auth_header },
-            },
-        });
-        errdefer req.deinit();
+        // Create headers map for signing
+        var headers = std.StringHashMap([]const u8).init(self.allocator);
+        defer headers.deinit();
 
         // Get the host string from the Component union
         const uri_host = switch (uri.host orelse return S3Error.InvalidResponse) {
             .raw => |h| h,
             .percent_encoded => |h| h,
         };
-        req.headers.host = .{ .override = uri_host };
 
-        // Set content-type header
+        // Get path string from Component union and handle root path
+        const uri_path = switch (uri.path) {
+            .raw => |p| if (p.len == 0) "/" else p,
+            .percent_encoded => |p| if (p.len == 0) "/" else p,
+        };
+
+        log.debug("Request URI host: {s}, path: {s}", .{ uri_host, uri_path });
+
+        // Add required headers in specific order
+        try headers.put("content-type", "application/xml");
+        try headers.put("host", uri_host);
+
+        // Calculate content hash
+        const content_hash = try signer.hashPayload(self.allocator, body);
+        defer self.allocator.free(content_hash);
+        try headers.put("x-amz-content-sha256", content_hash);
+
+        // Get current timestamp and format it properly
+        const now = std.time.timestamp();
+        const timestamp = @as(i64, @intCast(now));
+
+        // Format current time as x-amz-date header
+        const amz_date = try time_utils.formatAmzDateTime(self.allocator, timestamp);
+        defer self.allocator.free(amz_date);
+        try headers.put("x-amz-date", amz_date);
+
+        log.debug("Using current timestamp: {d}, formatted as: {s}", .{ timestamp, amz_date });
+
+        const credentials = signer.Credentials{
+            .access_key = self.config.access_key_id,
+            .secret_key = self.config.secret_access_key,
+            .region = self.config.region,
+            .service = "s3",
+        };
+
+        const params = signer.SigningParams{
+            .method = @tagName(method),
+            .path = uri_path,
+            .headers = headers,
+            .body = body,
+            .timestamp = timestamp, // Use same timestamp for signing
+        };
+
+        // Generate authorization header
+        const auth_header = try signer.signRequest(self.allocator, credentials, params);
+        defer self.allocator.free(auth_header);
+
+        log.debug("Generated auth header: {s}", .{auth_header});
+
+        var server_header_buffer: [8192]u8 = undefined;
+        var req = try self.http_client.open(method, uri, .{
+            .server_header_buffer = &server_header_buffer,
+            .extra_headers = &[_]http.Header{
+                .{ .name = "Accept", .value = "application/xml" },
+                .{ .name = "x-amz-content-sha256", .value = content_hash },
+                .{ .name = "x-amz-date", .value = amz_date },
+                .{ .name = "Authorization", .value = auth_header },
+            },
+        });
+        errdefer req.deinit();
+
+        req.headers.host = .{ .override = uri_host };
         req.headers.content_type = .{ .override = "application/xml" };
 
         try req.send();
 
-        // Write body if provided
         if (body) |b| {
             try req.writeAll(b);
         }

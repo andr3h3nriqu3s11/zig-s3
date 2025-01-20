@@ -50,7 +50,7 @@ const crypto = std.crypto;
 const fmt = std.fmt;
 const mem = std.mem;
 const time = std.time;
-
+const log = std.log;
 const time_utils = @import("time.zig");
 
 /// AWS region for signing
@@ -77,44 +77,105 @@ pub const SigningParams = struct {
     /// Request body (or null)
     body: ?[]const u8 = null,
     /// Request timestamp (or null for current time)
+    /// When null, the current time will be used
     timestamp: ?i64 = null,
 };
 
 /// Sign an S3 request using AWS Signature Version 4
-pub fn signRequest(
-    allocator: Allocator,
-    credentials: Credentials,
-    params: SigningParams,
-) ![]const u8 {
-    // Use current timestamp if none provided
-    const timestamp = params.timestamp orelse @as(i64, @intCast(time.timestamp()));
+pub fn signRequest(allocator: Allocator, credentials: Credentials, params: SigningParams) ![]const u8 {
+    // Use current time if no timestamp provided
+    const timestamp = params.timestamp orelse blk: {
+        const now = std.time.timestamp();
+        break :blk @as(i64, @intCast(now));
+    };
 
-    // Create canonical request
-    const canonical_request = try createCanonicalRequest(allocator, params);
-    defer allocator.free(canonical_request);
+    // Get the date string in the correct format (YYYYMMDD)
+    const date_str = try time_utils.formatAmzDate(allocator, timestamp);
+    defer allocator.free(date_str);
 
-    // Create string to sign
-    const string_to_sign = try createStringToSign(allocator, credentials, canonical_request, timestamp);
-    defer allocator.free(string_to_sign);
+    // Get the full datetime string for x-amz-date header
+    const datetime_str = try time_utils.formatAmzDateTime(allocator, timestamp);
+    defer allocator.free(datetime_str);
 
-    // Calculate signing key
-    const signing_key = try deriveSigningKey(allocator, credentials, timestamp);
-    defer allocator.free(signing_key);
+    log.debug("Signing request with date: {s}, datetime: {s}", .{ date_str, datetime_str });
 
-    // Calculate signature
-    const signature = try hmacSha256(allocator, signing_key, string_to_sign);
-    defer allocator.free(signature);
-
-    // Get credential scope
-    const credential_scope = try getCredentialScope(allocator, credentials, timestamp);
+    // Create credential scope
+    const credential_scope = try std.fmt.allocPrint(
+        allocator,
+        "{s}/{s}/s3/aws4_request",
+        .{ date_str, credentials.region },
+    );
     defer allocator.free(credential_scope);
 
-    // Get signed headers
-    const signed_headers = try getSignedHeaders(allocator, params.headers);
+    // Ensure x-amz-date header is set with current time
+    var headers_copy = try params.headers.clone();
+    defer headers_copy.deinit();
+    try headers_copy.put("x-amz-date", datetime_str);
+
+    // Create canonical request with updated headers
+    const canonical_request = try createCanonicalRequest(allocator, .{
+        .method = params.method,
+        .path = params.path,
+        .headers = headers_copy,
+        .body = params.body,
+        .timestamp = timestamp,
+    });
+    defer allocator.free(canonical_request);
+
+    log.debug("Canonical request:\n{s}", .{canonical_request});
+
+    // Create string to sign
+    const string_to_sign = try createStringToSign(
+        allocator,
+        "",
+        credential_scope,
+        canonical_request,
+        timestamp,
+    );
+    defer allocator.free(string_to_sign);
+
+    log.debug("String to sign:\n{s}", .{string_to_sign});
+
+    // Calculate signing key
+    const signing_key = try deriveSigningKey(
+        allocator,
+        credentials.secret_key,
+        date_str,
+        credentials.region,
+        "s3",
+    );
+    defer allocator.free(signing_key);
+
+    // Calculate final signature
+    const signature = try calculateSignature(allocator, signing_key, string_to_sign);
+    defer allocator.free(signature);
+
+    // Get signed headers string
+    var header_names = std.ArrayList([]const u8).init(allocator);
+    defer header_names.deinit();
+    defer {
+        for (header_names.items) |name| {
+            allocator.free(name);
+        }
+    }
+
+    var header_it = params.headers.iterator();
+    while (header_it.next()) |entry| {
+        const lower_name = try std.ascii.allocLowerString(allocator, entry.key_ptr.*);
+        try header_names.append(lower_name);
+    }
+
+    std.mem.sortUnstable([]const u8, header_names.items, {}, struct {
+        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.lessThan);
+
+    const signed_headers = try std.mem.join(allocator, ";", header_names.items);
     defer allocator.free(signed_headers);
 
-    // Create authorization header
-    return fmt.allocPrint(
+    // Create final authorization header
+    return std.fmt.allocPrint(
         allocator,
         "AWS4-HMAC-SHA256 Credential={s}/{s}, SignedHeaders={s}, Signature={s}",
         .{
@@ -131,59 +192,64 @@ fn createCanonicalRequest(allocator: Allocator, params: SigningParams) ![]const 
     var canonical = std.ArrayList(u8).init(allocator);
     errdefer canonical.deinit();
 
-    // Add HTTP method
+    // Add HTTP method (uppercase)
     try canonical.appendSlice(params.method);
     try canonical.append('\n');
 
-    // Add canonical URI
+    // Add canonical URI (must be normalized)
     try canonical.appendSlice(params.path);
     try canonical.append('\n');
 
     // Add canonical query string (empty for now)
     try canonical.append('\n');
 
-    // Add canonical headers
-    var headers = std.ArrayList([]const u8).init(allocator);
-    defer {
-        for (headers.items) |header| {
-            allocator.free(header);
-        }
-        headers.deinit();
-    }
+    // Create sorted list of header names for consistent ordering
+    var header_names = std.ArrayList([]const u8).init(allocator);
+    defer header_names.deinit();
 
     var header_it = params.headers.iterator();
     while (header_it.next()) |entry| {
-        const header = try fmt.allocPrint(
-            allocator,
-            "{s}:{s}\n",
-            .{ entry.key_ptr.*, entry.value_ptr.* },
-        );
-        errdefer allocator.free(header);
-        try headers.append(header);
+        // Convert header names to lowercase
+        const lower_name = try std.ascii.allocLowerString(allocator, entry.key_ptr.*);
+        try header_names.append(lower_name);
+    }
+    defer {
+        for (header_names.items) |name| {
+            allocator.free(name);
+        }
     }
 
-    // Sort headers
-    std.mem.sortUnstable([]const u8, headers.items, {}, struct {
+    // Sort header names alphabetically
+    std.mem.sortUnstable([]const u8, header_names.items, {}, struct {
         fn lessThan(_: void, a: []const u8, b: []const u8) bool {
             return std.mem.lessThan(u8, a, b);
         }
     }.lessThan);
 
-    // Add sorted headers to canonical request
-    for (headers.items) |header| {
-        try canonical.appendSlice(header);
+    // Add canonical headers in sorted order
+    for (header_names.items) |name| {
+        const value = params.headers.get(name) orelse continue;
+        // Trim and normalize value
+        const trimmed_value = std.mem.trim(u8, value, " \t\r\n");
+        try canonical.appendSlice(name);
+        try canonical.append(':');
+        try canonical.appendSlice(trimmed_value);
+        try canonical.append('\n');
     }
     try canonical.append('\n');
 
     // Add signed headers
-    const signed_headers = try getSignedHeaders(allocator, params.headers);
+    const signed_headers = try std.mem.join(allocator, ";", header_names.items);
     defer allocator.free(signed_headers);
     try canonical.appendSlice(signed_headers);
     try canonical.append('\n');
 
     // Add payload hash
-    const payload_hash = try hashPayload(allocator, params.body);
-    defer allocator.free(payload_hash);
+    const payload_hash = if (params.body) |body|
+        try hashPayload(allocator, body)
+    else
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    defer if (params.body != null) allocator.free(payload_hash);
     try canonical.appendSlice(payload_hash);
 
     return canonical.toOwnedSlice();
@@ -232,31 +298,26 @@ fn getSignedHeaders(allocator: Allocator, headers: std.StringHashMap([]const u8)
 ///         HEX(HASH(CANONICAL_REQUEST))
 fn createStringToSign(
     allocator: Allocator,
-    credentials: Credentials,
+    _: []const u8, // Mark unused date_str parameter with _
+    credential_scope: []const u8,
     canonical_request: []const u8,
     timestamp: i64,
 ) ![]const u8 {
     var result = std.ArrayList(u8).init(allocator);
-    defer result.deinit();
+    errdefer result.deinit();
 
     // Algorithm
     try result.appendSlice("AWS4-HMAC-SHA256\n");
 
-    // Timestamp
-    const timestamp_str = try time_utils.formatAmzDateTime(allocator, timestamp);
-    defer allocator.free(timestamp_str);
-    try result.appendSlice(timestamp_str);
+    // Get the full datetime string for the second line
+    const datetime_str = try time_utils.formatAmzDateTime(allocator, timestamp);
+    defer allocator.free(datetime_str);
+    try result.appendSlice(datetime_str);
     try result.append('\n');
 
     // Credential scope
-    const date = try time_utils.formatAmzDate(allocator, timestamp);
-    defer allocator.free(date);
-    try result.appendSlice(date);
-    try result.append('/');
-    try result.appendSlice(credentials.region);
-    try result.append('/');
-    try result.appendSlice(credentials.service);
-    try result.appendSlice("/aws4_request\n");
+    try result.appendSlice(credential_scope);
+    try result.append('\n');
 
     // Hashed canonical request
     var hash: [crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
@@ -271,18 +332,9 @@ fn createStringToSign(
 /// Calculate request signature using derived signing key
 fn calculateSignature(
     allocator: Allocator,
-    credentials: Credentials,
+    signing_key: []const u8,
     string_to_sign: []const u8,
-    timestamp: i64,
 ) ![]const u8 {
-    // Get signing key
-    const signing_key = try deriveSigningKey(
-        allocator,
-        credentials,
-        timestamp,
-    );
-    defer allocator.free(signing_key);
-
     // Calculate HMAC-SHA256
     var hmac: [crypto.auth.hmac.sha2.HmacSha256.mac_length]u8 = undefined;
     crypto.auth.hmac.sha2.HmacSha256.create(&hmac, string_to_sign, signing_key);
@@ -340,27 +392,26 @@ pub fn hashPayload(allocator: Allocator, payload: ?[]const u8) ![]const u8 {
 
 fn deriveSigningKey(
     allocator: Allocator,
-    credentials: Credentials,
-    timestamp: i64,
+    secret_key: []const u8,
+    date_str: []const u8,
+    region: Region,
+    service: Service,
 ) ![]const u8 {
-    const date = try time_utils.formatAmzDate(allocator, timestamp);
-    defer allocator.free(date);
-
     // kSecret = "AWS4" + secret access key
-    const k_secret = try fmt.allocPrint(allocator, "AWS4{s}", .{credentials.secret_key});
+    const k_secret = try fmt.allocPrint(allocator, "AWS4{s}", .{secret_key});
     defer allocator.free(k_secret);
 
     // kDate = HMAC-SHA256(kSecret, date)
     var k_date: [crypto.auth.hmac.sha2.HmacSha256.mac_length]u8 = undefined;
-    crypto.auth.hmac.sha2.HmacSha256.create(&k_date, date, k_secret);
+    crypto.auth.hmac.sha2.HmacSha256.create(&k_date, date_str, k_secret);
 
     // kRegion = HMAC-SHA256(kDate, region)
     var k_region: [crypto.auth.hmac.sha2.HmacSha256.mac_length]u8 = undefined;
-    crypto.auth.hmac.sha2.HmacSha256.create(&k_region, credentials.region, &k_date);
+    crypto.auth.hmac.sha2.HmacSha256.create(&k_region, region, &k_date);
 
     // kService = HMAC-SHA256(kRegion, service)
     var k_service: [crypto.auth.hmac.sha2.HmacSha256.mac_length]u8 = undefined;
-    crypto.auth.hmac.sha2.HmacSha256.create(&k_service, credentials.service, &k_region);
+    crypto.auth.hmac.sha2.HmacSha256.create(&k_service, service, &k_region);
 
     // kSigning = HMAC-SHA256(kService, "aws4_request")
     var k_signing: [crypto.auth.hmac.sha2.HmacSha256.mac_length]u8 = undefined;
@@ -464,7 +515,7 @@ test "deriveSigningKey" {
 
     const timestamp = 1704067200; // 2024-01-01 00:00:00 UTC
 
-    const key = try deriveSigningKey(allocator, credentials, timestamp);
+    const key = try deriveSigningKey(allocator, credentials.secret_key, timestamp, credentials.region, credentials.service);
     defer allocator.free(key);
 
     try std.testing.expect(key.len > 0);
@@ -499,4 +550,23 @@ test "signRequest full flow" {
 
     try std.testing.expect(std.mem.startsWith(u8, auth_header, "AWS4-HMAC-SHA256"));
     try std.testing.expect(std.mem.indexOf(u8, auth_header, credentials.access_key) != null);
+}
+
+test "createStringToSign" {
+    const allocator = std.testing.allocator;
+    const date_str = "20250120";
+    const scope = "20250120/us-west-1/s3/aws4_request";
+    const request = "GET\n/\n\nhost:example.com\n\nhost\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    const timestamp: i64 = 1705790067; // 20250120T231427Z
+
+    const string_to_sign = try createStringToSign(
+        allocator,
+        date_str,
+        scope,
+        request,
+        timestamp,
+    );
+    defer allocator.free(string_to_sign);
+
+    try std.testing.expect(string_to_sign.len > 0);
 }

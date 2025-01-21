@@ -15,6 +15,7 @@ and this project adheres to
 - Error handling for connection failures
 - Documentation for test coverage
 - Support for MinIO testing environment
+- Bucket CRUD functionality completed
 
 ### Changed
 

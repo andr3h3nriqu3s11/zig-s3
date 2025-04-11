@@ -214,7 +214,7 @@ pub fn listObjects(
     }
 
     // Simple XML parsing - look for <Contents> elements
-    var it = std.mem.split(u8, body, "<Contents>");
+    var it = std.mem.splitSequence(u8, body, "<Contents>");
     _ = it.first(); // Skip first part before any <Contents>
 
     while (it.next()) |object_xml| {

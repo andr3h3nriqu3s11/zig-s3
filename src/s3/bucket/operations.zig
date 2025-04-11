@@ -166,7 +166,7 @@ pub fn listBuckets(self: *S3Client) ![]BucketInfo {
         buckets.deinit();
     }
 
-    var it = std.mem.split(u8, body, "<Bucket>");
+    var it = std.mem.splitSequence(u8, body, "<Bucket>");
     _ = it.first(); // Skip first part before any <Bucket>
 
     while (it.next()) |bucket_xml| {

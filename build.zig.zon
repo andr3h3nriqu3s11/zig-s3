@@ -1,6 +1,7 @@
 .{
-    .name = "zig-s3",
+    .name = .zig_s3,
     .version = "0.2.0",
+    .fingerprint = 0xf58a772c84221497,
     .minimum_zig_version = "0.13.0",
     .dependencies = .{
         .dotenv = .{

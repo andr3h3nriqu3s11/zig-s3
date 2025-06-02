@@ -166,6 +166,10 @@ pub const S3Client = struct {
         req.headers.host = .{ .override = uri_host };
         req.headers.content_type = .{ .override = "application/xml" };
 
+        if (body) |b| {
+            req.transfer_encoding = .{ .content_length = b.len };
+        }
+
         try req.send();
 
         if (body) |b| {

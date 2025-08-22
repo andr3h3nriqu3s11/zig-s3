@@ -79,8 +79,7 @@ pub fn getObject(self: *S3Client, bucket_name: []const u8, key: []const u8) ![]c
         return S3Error.InvalidResponse;
     }
 
-    // TODO: Support streaming for large objects
-    return try req.reader().readAllAlloc(self.allocator, 1024 * 1024); // 1MB max
+    return try req.reader().readAllAlloc(self.allocator, self.config.max_size);
 }
 
 /// Delete an object from S3.

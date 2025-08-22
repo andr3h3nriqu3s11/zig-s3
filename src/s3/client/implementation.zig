@@ -26,6 +26,8 @@ pub const S3Config = struct {
     region: []const u8,
     /// Optional custom endpoint for S3-compatible services (e.g., MinIO, LocalStack)
     endpoint: ?[]const u8 = null,
+    // Optional max size defaults to 1MB
+    max_size: u64 = 1024 * 1024,
 };
 
 /// Main S3 client implementation.
